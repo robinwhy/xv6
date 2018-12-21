@@ -1,0 +1,15 @@
+#ifndef _PROCSTAT_H_
+#define _PROCSTAT_H_
+#include "param.h"
+extern enum procstate state;
+struct procstat{
+  int inuse[NPROC];
+  int killed[NPROC];
+  int pid[NPROC];
+  uint sz[NPROC];
+  enum procstate state[NPROC];
+  int parent[NPROC];
+  void* wait[NPROC];
+  char* name[NPROC];
+};
+#endif

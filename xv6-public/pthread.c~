@@ -1,0 +1,116 @@
+#include "types.h"
+#include "user.h"
+#include "x86.h"
+#define NULL 0
+#define PGSIZE (4096)
+int thread_create(thread *thread, thread_attr_t *attr, void(*func)(void*), void*arg){
+  void *stack = malloc((uint)PGSIZE*2);
+  if((uint)stack <= 0){
+    printf(1, "Malloc new stack failed in pthread_create\n");
+    return -1;
+  }
+  if((uint)stack % PGSIZE){
+    stack += 4096 - ((uint)stack % PGSIZE);
+  }
+  *thread = clone(func, arg, stack);
+  return *thread;
+}
+
+int thread_join(thread thread, void **retval){
+  void *stack;
+  if(join((uint)thread, &stack)<0){
+    return -1;
+  }
+  free(stack);
+  return 0;
+}
+
+void thread_mutex_init(thread_mutex *mutex){
+  *mutex = 0;
+  return;
+}
+
+void thread_mutex_lock(thread_mutex *mutex){
+  while(xchg(mutex, 1) != 0);
+  return;
+}
+
+void thread_mutex_unlock(thread_mutex *mutex){
+  xchg(mutex, 0);
+  return;
+}
+
+void thread_cond_init(thread_cond *cond){
+  cond->threadId = -1;
+  cond->next = NULL;
+  return;
+}
+
+void thread_cond_wait(thread_cond *cond, thread_mutex *mutex){
+  thread_cond *mycond = cond;
+  thread_mutex_unlock(mutex);
+  
+  //iterate the linked-list pointer to the end;
+  while(mycond->next != NULL)
+    mycond = mycond->next;  
+
+  mycond->next = (thread_cond *)malloc(sizeof(mpthread_cond_t));
+  mycond->next->threadId = getpid();
+  mycond->next->next = NULL;
+  threadSleep(mutex);
+  thread_mutex_lock(mutex);
+  return;
+}
+
+void thread_cond_signal(thread_cond *cond){
+  thread_cond *mycond = cond;
+  while(mycond->threadId==-1)
+    mycond = mycond->next;
+  if(mycond!=NULL){
+    int threadId = mycond->threadId;
+    thread_cond *garbage = mycond;
+    cond->next = cond->next->next;
+    free(garbage);
+    threadWake(threadId);
+  }
+  return;
+}
+
+struct q {
+   struct thread_cond cv;
+   struct thread_mutex m;
+   void *ptr;
+};
+
+// Initialize
+thread_cond_init(&q->cv);
+thread_mutex_init(&q->m);
+
+// Thread 1 (sender)
+void*
+send(struct q *q, void *p)
+{
+   thread_mutex_lock(&q->m);
+   while(q->ptr != 0)
+      ;
+   q->ptr = p;
+   thread_cond_signal(&q->cv);
+   thread_mutex_unlock(&q->m);
+}
+
+// Thread 2 (receiver)
+
+void*
+recv(struct q *q)
+{
+  void *p;
+
+  thread_mutex_lock(&q->m);
+
+  while((p = q->ptr) == 0)
+    pthread_cond_wait(&q->cv, &q->m);
+  q->ptr = 0;
+
+  thread_mutex_unlock(&q->m);
+  return p;
+}
